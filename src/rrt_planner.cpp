@@ -3,6 +3,8 @@
 #include <pluginlib/class_list_macros.h>
 #include <visualization_msgs/Marker.h>
 #include <Eigen/Dense>
+#include <pcl/point_cloud.h>
+#include <pcl/octree/octree.h>
 
 //register this planner as a BaseGlobalPlanner plugin
 PLUGINLIB_EXPORT_CLASS(rrt_planner::RRTPlanner, nav_core::BaseGlobalPlanner)
@@ -11,6 +13,8 @@ namespace rrt_planner {
 
 using namespace std;
 using costmap_2d::FREE_SPACE;
+using PointT = pcl::PointXYZ;
+using CloudT = pcl::PointCloud<PointT>;
 
 RRTPlanner::RRTPlanner() : pn("~") {
 
@@ -225,13 +229,26 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
     tree_node root {start.pose, 0.0, -1};
     nodes.push_back(root);
 
+    PointT start_xy { start.pose.position.x, start.pose.position.y, 0.0f };
+    CloudT::Ptr cloud(new CloudT);
+    cloud->push_back(start_xy);
+    float resolution = 0.4;
+    pcl::octree::OctreePointCloudSearch<PointT> octree(resolution);
+    octree.setInputCloud(cloud);
+    octree.addPointsFromInputCloud();
+
     int minidx = -1;
     double mincost = std::numeric_limits<double>::infinity();
     const int N = 10000;
     for (int i = 0; i < N; ++i) {
         geometry_msgs::Pose sampled = sample();
         // find closest node
-        int nearest_idx = nearest(sampled, nodes);
+        //int nearest_idx = nearest(sampled, nodes);
+        vector<int> idxs;
+        vector<float> sqrd_dists;
+        PointT sampled_xy { sampled.position.x, sampled.position.y, 0.0f };
+        octree.nearestKSearch(sampled_xy, 1, idxs, sqrd_dists);
+        int nearest_idx = idxs[0];
         tree_node nearest = nodes[nearest_idx];
         geometry_msgs::Pose towards_sampled = generate_control(nearest.pose, sampled);
         double towards_cost = cost(towards_sampled);
@@ -241,6 +258,8 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
         // now check which ones are nearby, pick the closest
         tree_node new_node {towards_sampled, nearest.accum_cost+towards_cost, nearest_idx};
         nodes.push_back(new_node);
+        PointT new_xy { towards_sampled.position.x, towards_sampled.position.y, 0.0f };
+        octree.addPointToCloud(new_xy, cloud);
 
         if (pose_squared_dist(goal.pose, new_node.pose) < 0.2*0.2 &&
             new_node.accum_cost < mincost) {
