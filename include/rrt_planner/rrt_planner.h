@@ -11,6 +11,8 @@
 #include <angles/angles.h>
 #include <base_local_planner/world_model.h>
 #include <base_local_planner/costmap_model.h>
+#include <pcl/point_cloud.h>
+#include <pcl/octree/octree.h>
 
 using std::string;
 
@@ -23,9 +25,15 @@ struct tree_node {
 };
 
 class RRTPlanner : public nav_core::BaseGlobalPlanner {
+public:
+
+    using PointT = pcl::PointXYZ;
+    using CloudT = pcl::PointCloud<PointT>;
+
 private:
     double increment_dist;
     double min_turn_radius;
+    double travel_cost;
     ros::NodeHandle pn;
     ros::Publisher pub;
 
@@ -36,10 +44,16 @@ private:
     std::vector<geometry_msgs::Point> footprint;
 
     double cost(const geometry_msgs::Pose& pose);
-    int nearest(const geometry_msgs::Pose& pose, const std::vector<tree_node>& nodes);
+    int nearest(const geometry_msgs::Pose& pose, pcl::octree::OctreePointCloudSearch<PointT>& octree);
     geometry_msgs::Pose sample();
-    geometry_msgs::Pose generate_control(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2);
+    std::pair<geometry_msgs::Pose, double> steer_towards(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2);
+    std::pair<geometry_msgs::Pose, double> steer(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2);
     void publish_display_tree_message(const std::vector<tree_node>& nodes);
+    std::vector<int> near(const geometry_msgs::Pose& pose, const pcl::octree::OctreePointCloudSearch<PointT>& octree);
+    tree_node choose_parent(const geometry_msgs::Pose& towards_sampled, std::vector<int>& T,
+                            int initial_parent, std::vector<tree_node>& nodes);
+    void rewire(const tree_node& new_node, int new_ind, std::vector<int>& T,
+                std::vector<tree_node>& nodes);
 public:
 
     RRTPlanner();

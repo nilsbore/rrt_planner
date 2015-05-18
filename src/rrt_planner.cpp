@@ -3,8 +3,6 @@
 #include <pluginlib/class_list_macros.h>
 #include <visualization_msgs/Marker.h>
 #include <Eigen/Dense>
-#include <pcl/point_cloud.h>
-#include <pcl/octree/octree.h>
 
 //register this planner as a BaseGlobalPlanner plugin
 PLUGINLIB_EXPORT_CLASS(rrt_planner::RRTPlanner, nav_core::BaseGlobalPlanner)
@@ -13,8 +11,6 @@ namespace rrt_planner {
 
 using namespace std;
 using costmap_2d::FREE_SPACE;
-using PointT = pcl::PointXYZ;
-using CloudT = pcl::PointCloud<PointT>;
 
 RRTPlanner::RRTPlanner() : pn("~") {
 
@@ -29,7 +25,8 @@ void RRTPlanner::initialize(std::string name, costmap_2d::Costmap2DROS* costmap_
         pub = pn.advertise<visualization_msgs::Marker>("/rrt_paths", 1);
 
         increment_dist = 0.6;
-        min_turn_radius = 0.4;
+        min_turn_radius = 0.3;
+        travel_cost = 1.0;
 
         costmap_ros_ = costmap_ros; //initialize the costmap_ros_ attribute to the parameter.
         costmap_ = costmap_ros_->getCostmap(); //get the costmap_ from costmap_ros_
@@ -108,23 +105,28 @@ double pose_squared_dist(const geometry_msgs::Pose& p1, const geometry_msgs::Pos
     return xdiff*xdiff+ydiff*ydiff;
 }
 
-int RRTPlanner::nearest(const geometry_msgs::Pose& pose, const vector<tree_node>& nodes)
+int RRTPlanner::nearest(const geometry_msgs::Pose& pose, pcl::octree::OctreePointCloudSearch<PointT>& octree)
 {
-    int minidx = -1;
-    double mindist = std::numeric_limits<double>::infinity();
-    int idx = 0;
-    for (const tree_node& n : nodes) {
-        if (pose_squared_dist(n.pose, pose) < mindist) {
-            minidx = idx;
-            mindist = pose_squared_dist(n.pose, pose);
-        }
-        ++idx;
-    }
-    return minidx;
+    vector<int> idxs;
+    vector<float> sqrd_dists;
+    PointT pose_xy { pose.position.x, pose.position.y, 0.0f };
+    int found = octree.nearestKSearch(pose_xy, 1, idxs, sqrd_dists);
+    return idxs[0];
+}
+
+vector<int> RRTPlanner::near(const geometry_msgs::Pose& pose, const pcl::octree::OctreePointCloudSearch<PointT>& octree)
+{
+    const float radius = 1.0f;
+
+    PointT pose_xy { pose.position.x, pose.position.y, 0.0f };
+    vector<int> idxs;
+    vector<float> sqrd_dists;
+    int found = octree.radiusSearch(pose_xy, radius, idxs, sqrd_dists);
+    return idxs;
 }
 
 //pair<geometry_msgs::Pose, geometry_msgs::Point>
-geometry_msgs::Pose RRTPlanner::generate_control(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2)
+pair<geometry_msgs::Pose, double> RRTPlanner::steer_towards(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2)
 {
     tf::Stamped<tf::Pose> tf_pose;
     poseMsgToTF(p1, tf_pose);
@@ -135,10 +137,6 @@ geometry_msgs::Pose RRTPlanner::generate_control(const geometry_msgs::Pose& p1, 
     Eigen::Vector2d diff(point(0)-p2.position.x, point(1)-p2.position.y);
     Eigen::Vector2d normal(-sin(yaw), cos(yaw));
     double radius = -0.5*diff.squaredNorm()/diff.dot(normal);
-    /*if (radius < 0) {
-        radius *= -1.0;
-        normal *= -1.0;
-    }*/
     if (fabs(radius) < min_turn_radius) {
         radius = copysign(min_turn_radius, radius);
     }
@@ -147,15 +145,6 @@ geometry_msgs::Pose RRTPlanner::generate_control(const geometry_msgs::Pose& p1, 
     Eigen::Vector2d on_circle1 = point - center;
     double theta = atan2(on_circle1(1), on_circle1(0)); // same as yaw????
 
-    /*Eigen::Vector2d on_circle2(p2.position.x-center(0), p2.position.y-center(1));
-    double theta2 = atan2(on_circle2(1), on_circle2(0));
-    double thetaprim;
-    if (fabs(theta-theta2) < increment_dist/radius) {
-        thetaprim = theta2;
-    }
-    else {
-        thetaprim = theta + increment_dist/radius;
-    }*/
     double thetaprim = theta + increment_dist/radius;
     Eigen::Vector2d target = center + fabs(radius)*Eigen::Vector2d(cos(thetaprim), sin(thetaprim));
 
@@ -174,7 +163,51 @@ geometry_msgs::Pose RRTPlanner::generate_control(const geometry_msgs::Pose& p1, 
     rtn.orientation.z = goal_quat.z();
     rtn.orientation.w = goal_quat.w();
 
-    return rtn;
+    return make_pair(rtn, increment_dist);
+}
+
+pair<geometry_msgs::Pose, double> RRTPlanner::steer(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2)
+{
+    double cost = 1.0;
+
+    tf::Stamped<tf::Pose> tf_pose;
+    poseMsgToTF(p1, tf_pose);
+    double useless_pitch, useless_roll, yaw;
+    tf_pose.getBasis().getEulerYPR(yaw, useless_pitch, useless_roll);
+
+    Eigen::Vector2d point(p1.position.x, p1.position.y);
+    Eigen::Vector2d diff(point(0)-p2.position.x, point(1)-p2.position.y);
+    Eigen::Vector2d normal(-sin(yaw), cos(yaw));
+    double radius = -0.5*diff.squaredNorm()/diff.dot(normal);
+
+    if (fabs(radius) < min_turn_radius) {
+        return make_pair(p1, -1.0);
+    }
+    Eigen::Vector2d center = point + radius*normal;
+
+    Eigen::Vector2d on_circle1 = point - center;
+    double theta1 = atan2(on_circle1(1), on_circle1(0)); // same as yaw????
+
+    Eigen::Vector2d on_circle2 = Eigen::Vector2d(p2.position.x, p2.position.y) - center;
+    double theta2 = atan2(on_circle2(1), on_circle2(0)); // same as yaw????
+
+    // fmod 2*M_PI
+    double arc_length = fmod(fabs(theta1 - theta2), 2.0*M_PI)*fabs(radius);
+
+    geometry_msgs::Pose rtn = p2;
+    if (radius < 0) {
+        theta2 -= M_PI/2.0;
+    }
+    else {
+        theta2 += M_PI/2.0;
+    }
+    tf::Quaternion goal_quat = tf::createQuaternionFromYaw(theta2);
+    rtn.orientation.x = goal_quat.x();
+    rtn.orientation.y = goal_quat.y();
+    rtn.orientation.z = goal_quat.z();
+    rtn.orientation.w = goal_quat.w();
+
+    return make_pair(rtn, arc_length);
 }
 
 void RRTPlanner::publish_display_tree_message(const vector<tree_node>& nodes)
@@ -218,6 +251,57 @@ void RRTPlanner::publish_display_tree_message(const vector<tree_node>& nodes)
     pub.publish(marker);
 }
 
+tree_node RRTPlanner::choose_parent(const geometry_msgs::Pose& towards_sampled, vector<int>& T,
+                                    int initial_parent, vector<tree_node>& nodes)
+{
+
+    double mincost = nodes[initial_parent].accum_cost + travel_cost*increment_dist;
+    double minidx = initial_parent;
+    geometry_msgs::Pose minpose = towards_sampled;
+
+    for (int idx : T) {
+        if (idx == initial_parent) {
+            continue;
+        }
+        geometry_msgs::Pose towards_pose;
+        double dist;
+        tie(towards_pose, dist) = steer(nodes[idx].pose, towards_sampled);
+        if (dist < 0) {
+            continue;
+        }
+        double cost = nodes[idx].accum_cost + travel_cost*dist;
+        if (cost < mincost) {
+            mincost = cost;
+            minidx = idx;
+            minpose = towards_pose;
+        }
+    }
+
+    tree_node new_node { minpose, mincost, minidx };
+    return new_node;
+}
+
+void RRTPlanner::rewire(const tree_node& new_node, int new_ind, vector<int>& T,
+                        vector<tree_node>& nodes)
+{
+    for (int idx : T) {
+        if (idx == new_node.parent_idx) {
+            continue;
+        }
+        double dist;
+        geometry_msgs::Pose pose;
+        tie(pose, dist) = steer(new_node.pose, nodes[idx].pose);
+        if (dist < 0) {
+            continue;
+        }
+        double new_cost = travel_cost*dist + new_node.accum_cost;
+        if (new_cost < nodes[idx].accum_cost) {
+            nodes[idx].parent_idx = new_ind;
+            nodes[idx].accum_cost = new_cost;
+        }
+    }
+}
+
 bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometry_msgs::PoseStamped& goal,  std::vector<geometry_msgs::PoseStamped>& plan )
 {
     costmap_ = costmap_ros_->getCostmap();
@@ -243,29 +327,37 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
     for (int i = 0; i < N; ++i) {
         geometry_msgs::Pose sampled = sample();
         // find closest node
-        //int nearest_idx = nearest(sampled, nodes);
-        vector<int> idxs;
-        vector<float> sqrd_dists;
-        PointT sampled_xy { sampled.position.x, sampled.position.y, 0.0f };
-        octree.nearestKSearch(sampled_xy, 1, idxs, sqrd_dists);
-        int nearest_idx = idxs[0];
+        int nearest_idx = nearest(sampled, octree);
         tree_node nearest = nodes[nearest_idx];
-        geometry_msgs::Pose towards_sampled = generate_control(nearest.pose, sampled);
+        geometry_msgs::Pose towards_sampled;
+        double dist;
+        tie(towards_sampled, dist) = steer_towards(nearest.pose, sampled);
         double towards_cost = cost(towards_sampled);
         if (towards_cost < 0) {
             continue;
         }
+        vector<int> T = near(towards_sampled, octree);
+        // we might also need the resulting angle and the new cost here
+
+        tree_node new_node;
+        new_node = choose_parent(towards_sampled, T, nearest_idx, nodes);
+
         // now check which ones are nearby, pick the closest
-        tree_node new_node {towards_sampled, nearest.accum_cost+towards_cost, nearest_idx};
         nodes.push_back(new_node);
-        PointT new_xy { towards_sampled.position.x, towards_sampled.position.y, 0.0f };
+        PointT new_xy { new_node.pose.position.x, new_node.pose.position.y, 0.0f };
         octree.addPointToCloud(new_xy, cloud);
 
+        rewire(new_node, nodes.size()-1, T, nodes);
+
+        // we actually have to check this for a lot more nodes now
         if (pose_squared_dist(goal.pose, new_node.pose) < 0.2*0.2 &&
             new_node.accum_cost < mincost) {
+            mincost = new_node.accum_cost;
             minidx = nodes.size() - 1;
         }
     }
+
+    cout << "Min path cost: " << mincost << endl;
 
     publish_display_tree_message(nodes);
 
