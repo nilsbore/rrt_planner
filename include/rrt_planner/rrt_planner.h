@@ -35,7 +35,7 @@ private:
     double min_turn_radius;
     double travel_cost;
     ros::NodeHandle pn;
-    ros::Publisher pub;
+    ros::Publisher tree_pub;
 
     costmap_2d::Costmap2DROS* costmap_ros_;
     costmap_2d::Costmap2D* costmap_;
@@ -54,6 +54,8 @@ private:
                             int initial_parent, std::vector<tree_node>& nodes);
     void rewire(const tree_node& new_node, int new_ind, std::vector<int>& T,
                 std::vector<tree_node>& nodes);
+    std::vector<geometry_msgs::Point> generate_local_path(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2);
+    void publish_display_path_message(int goal_idx, const std::vector<tree_node>& nodes);
 public:
 
     RRTPlanner();

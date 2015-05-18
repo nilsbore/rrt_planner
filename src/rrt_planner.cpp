@@ -22,7 +22,7 @@ RRTPlanner::RRTPlanner(std::string name, costmap_2d::Costmap2DROS* costmap_ros) 
 
 void RRTPlanner::initialize(std::string name, costmap_2d::Costmap2DROS* costmap_ros) {
     if (!initialized_) {
-        pub = pn.advertise<visualization_msgs::Marker>("/rrt_paths", 1);
+        tree_pub = pn.advertise<visualization_msgs::Marker>("/rrt_paths", 10);
 
         increment_dist = 0.6;
         min_turn_radius = 0.3;
@@ -168,8 +168,6 @@ pair<geometry_msgs::Pose, double> RRTPlanner::steer_towards(const geometry_msgs:
 
 pair<geometry_msgs::Pose, double> RRTPlanner::steer(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2)
 {
-    double cost = 1.0;
-
     tf::Stamped<tf::Pose> tf_pose;
     poseMsgToTF(p1, tf_pose);
     double useless_pitch, useless_roll, yaw;
@@ -210,6 +208,46 @@ pair<geometry_msgs::Pose, double> RRTPlanner::steer(const geometry_msgs::Pose& p
     return make_pair(rtn, arc_length);
 }
 
+vector<geometry_msgs::Point> RRTPlanner::generate_local_path(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2)
+{
+    tf::Stamped<tf::Pose> tf_pose;
+    poseMsgToTF(p1, tf_pose);
+    double useless_pitch, useless_roll, yaw;
+    tf_pose.getBasis().getEulerYPR(yaw, useless_pitch, useless_roll);
+
+    Eigen::Vector2d point(p1.position.x, p1.position.y);
+    Eigen::Vector2d diff(point(0)-p2.position.x, point(1)-p2.position.y);
+    Eigen::Vector2d normal(-sin(yaw), cos(yaw));
+    double radius = -0.5*diff.squaredNorm()/diff.dot(normal);
+
+    Eigen::Vector2d center = point + radius*normal;
+
+    Eigen::Vector2d on_circle1 = point - center;
+    double theta1 = atan2(on_circle1(1), on_circle1(0)); // same as yaw????
+
+    Eigen::Vector2d on_circle2 = Eigen::Vector2d(p2.position.x, p2.position.y) - center;
+    double theta2 = atan2(on_circle2(1), on_circle2(0)); // same as yaw????
+
+    if (theta2-theta1 > M_PI) {
+        theta2 -= 2.0*M_PI;
+    }
+    else if (theta2-theta1 < -M_PI) {
+        theta2 += 2.0*M_PI;
+    }
+    double increment = copysign(0.05/fabs(radius), theta2-theta1);
+
+    vector<geometry_msgs::Point> path;
+    for (double theta = theta1; fabs(theta-theta2) > 0.05/fabs(radius); theta += increment) {
+        geometry_msgs::Point point;
+        point.x = center(0)+fabs(radius)*cos(theta);
+        point.y = center(1)+fabs(radius)*sin(theta);
+        point.z = 0.0f;
+        path.push_back(point);
+    }
+
+    return path;
+}
+
 void RRTPlanner::publish_display_tree_message(const vector<tree_node>& nodes)
 {
     Eigen::Quaterniond quat;
@@ -248,7 +286,45 @@ void RRTPlanner::publish_display_tree_message(const vector<tree_node>& nodes)
         idx += 2;
     }
 
-    pub.publish(marker);
+    tree_pub.publish(marker);
+}
+
+void RRTPlanner::publish_display_path_message(int goal_idx, const vector<tree_node>& nodes)
+{
+    Eigen::Quaterniond quat;
+    quat.setIdentity();
+
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = "/map";
+    marker.header.stamp = ros::Time();
+    marker.ns = "my_namespace"; // what's this for?
+    marker.id = 1;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.type = visualization_msgs::Marker::LINE_STRIP;
+    marker.pose.position.x = 0.0;
+    marker.pose.position.y = 0.0;
+    marker.pose.position.z = 0.0;
+    marker.pose.orientation.x = quat.x();
+    marker.pose.orientation.y = quat.y();
+    marker.pose.orientation.z = quat.z();
+    marker.pose.orientation.w = quat.w();
+    marker.scale.x = 0.04;
+    marker.color.a = 1.0;
+    marker.color.r = 1.0;
+    marker.color.g = 0.0;
+    marker.color.b = 0.0;
+
+    int next_idx = nodes[goal_idx].parent_idx;
+    geometry_msgs::Pose previous_pose = nodes[goal_idx].pose;
+    while (next_idx != -1) {
+        geometry_msgs::Pose current_pose = nodes[next_idx].pose;
+        vector<geometry_msgs::Point> local_path = generate_local_path(current_pose, previous_pose);
+        marker.points.insert(marker.points.end(), local_path.rbegin(), local_path.rend());
+        next_idx = nodes[next_idx].parent_idx;
+        previous_pose = current_pose;
+    }
+
+    tree_pub.publish(marker);
 }
 
 tree_node RRTPlanner::choose_parent(const geometry_msgs::Pose& towards_sampled, vector<int>& T,
@@ -364,6 +440,8 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
     if (minidx == -1) {
         return false;
     }
+
+    publish_display_path_message(minidx, nodes);
 
     int next_idx = minidx;
     plan.push_back(goal);
