@@ -388,9 +388,10 @@ tree_node RRTPlanner::choose_parent(const geometry_msgs::Pose& towards_sampled, 
     return new_node;
 }
 
-void RRTPlanner::recompute_cost(double cost_diff, tree_node& current_node, vector<tree_node>& nodes)
+void RRTPlanner::recompute_cost(double cost_diff, double time_diff, tree_node& current_node, vector<tree_node>& nodes)
 {
     current_node.accum_cost -= cost_diff;
+    current_node.time_elapsed -= time_diff;
     for (int i : current_node.children_idxs) {
         recompute_cost(cost_diff, nodes[i], nodes);
     }
@@ -418,9 +419,9 @@ void RRTPlanner::rewire(const tree_node& new_node, int new_ind, vector<int>& T,
             nodes[new_ind].children_idxs.insert(idx);
             nodes[idx].parent_idx = new_ind;
 
-            nodes[idx].time_elapsed = new_time; // need to fix this
             double cost_diff = nodes[idx].accum_cost - new_cost;
-            recompute_cost(cost_diff, nodes[idx], nodes);
+            double time_diff = nodes[idx].time_elapsed - new_time; // need to fix this
+            recompute_cost(cost_diff, time_diff, nodes[idx], nodes);
         }
     }
 }
