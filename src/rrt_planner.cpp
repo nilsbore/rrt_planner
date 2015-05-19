@@ -105,6 +105,11 @@ double pose_squared_dist(const geometry_msgs::Pose& p1, const geometry_msgs::Pos
     return xdiff*xdiff+ydiff*ydiff;
 }
 
+double pose_angle_dist(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2)
+{
+    return fabs(acos(p1.position.x*p2.position.x+p1.position.y*p2.position.y));
+}
+
 int RRTPlanner::nearest(const geometry_msgs::Pose& pose, pcl::octree::OctreePointCloudSearch<PointT>& octree)
 {
     vector<int> idxs;
@@ -367,7 +372,9 @@ void RRTPlanner::rewire(const tree_node& new_node, int new_ind, vector<int>& T,
         double dist;
         geometry_msgs::Pose pose;
         tie(pose, dist) = steer(new_node.pose, nodes[idx].pose);
-        if (dist < 0) {
+        // also check if angle disance between poses
+        // is too big
+        if (dist < 0 || pose_angle_dist(pose, nodes[idx].pose) > M_PI/10.0) {
             continue;
         }
         double new_cost = travel_cost*dist + new_node.accum_cost;
