@@ -358,8 +358,18 @@ tree_node RRTPlanner::choose_parent(const geometry_msgs::Pose& towards_sampled, 
         }
     }
 
-    tree_node new_node { minpose, mincost, minidx };
+    tree_node new_node { minpose, mincost, minidx, set<int>() };
+    nodes[minidx].children_idxs.insert(nodes.size());
+
     return new_node;
+}
+
+void RRTPlanner::recompute_cost(double cost_diff, tree_node& current_node, vector<tree_node>& nodes)
+{
+    current_node.accum_cost -= cost_diff;
+    for (int i : current_node.children_idxs) {
+        recompute_cost(cost_diff, nodes[i], nodes);
+    }
 }
 
 void RRTPlanner::rewire(const tree_node& new_node, int new_ind, vector<int>& T,
@@ -379,8 +389,11 @@ void RRTPlanner::rewire(const tree_node& new_node, int new_ind, vector<int>& T,
         }
         double new_cost = travel_cost*dist + new_node.accum_cost;
         if (new_cost < nodes[idx].accum_cost) {
+            nodes[nodes[idx].parent_idx].children_idxs.erase(idx);
+            nodes[new_ind].children_idxs.insert(idx);
             nodes[idx].parent_idx = new_ind;
-            nodes[idx].accum_cost = new_cost;
+            double cost_diff = nodes[idx].accum_cost - new_cost;
+            recompute_cost(cost_diff, nodes[idx], nodes);
         }
     }
 }
@@ -393,7 +406,7 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
     plan.clear();
 
     vector<tree_node> nodes;
-    tree_node root {start.pose, 0.0, -1};
+    tree_node root {start.pose, 0.0, -1, set<int>()};
     nodes.push_back(root);
 
     PointT start_xy { start.pose.position.x, start.pose.position.y, 0.0f };

@@ -22,6 +22,7 @@ struct tree_node {
     geometry_msgs::Pose pose;
     double accum_cost;
     int parent_idx;
+    std::set<int> children_idxs;
 };
 
 class RRTPlanner : public nav_core::BaseGlobalPlanner {
@@ -52,6 +53,7 @@ private:
     std::vector<int> near(const geometry_msgs::Pose& pose, const pcl::octree::OctreePointCloudSearch<PointT>& octree);
     tree_node choose_parent(const geometry_msgs::Pose& towards_sampled, std::vector<int>& T,
                             int initial_parent, std::vector<tree_node>& nodes);
+    void recompute_cost(double cost_diff, tree_node& current_node, std::vector<tree_node>& nodes);
     void rewire(const tree_node& new_node, int new_ind, std::vector<int>& T,
                 std::vector<tree_node>& nodes);
     std::vector<geometry_msgs::Point> generate_local_path(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2);
