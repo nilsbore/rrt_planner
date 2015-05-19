@@ -62,6 +62,20 @@ double RRTPlanner::cost(const geometry_msgs::Pose& pose)
     return world_model_->footprintCost(pose.position.x, pose.position.y, yaw, footprint);
 }
 
+double RRTPlanner::human_cost(const geometry_msgs::Pose& pose, double time)
+{
+    Eigen::Vector2d robot_pose(pose.position.x, pose.position.y);
+    for (const people_msgs::Person& p : people) {
+        Eigen::Vector2d human_init(p.position.x, p.position.y);
+        Eigen::Vector2d human_vel(p.velocity.x, p.velocity.y);
+        double dist = (robot_pose-human_init-time*human_vel).squaredNorm();
+        if (dist < 0.4) {
+            return -1.0;
+        }
+    }
+    return 1.0;
+}
+
 geometry_msgs::Pose RRTPlanner::sample()
 {
     // get min/max of costmap
@@ -345,6 +359,7 @@ tree_node RRTPlanner::choose_parent(const geometry_msgs::Pose& towards_sampled, 
 {
 
     double mincost = nodes[initial_parent].accum_cost + travel_cost*increment_dist;
+    double mintime = nodes[initial_parent].time_elapsed + increment_dist/mean_speed;
     double minidx = initial_parent;
     geometry_msgs::Pose minpose = towards_sampled;
 
@@ -363,10 +378,11 @@ tree_node RRTPlanner::choose_parent(const geometry_msgs::Pose& towards_sampled, 
             mincost = cost;
             minidx = idx;
             minpose = towards_pose;
+            mintime = nodes[idx].time_elapsed + dist/mean_speed;
         }
     }
 
-    tree_node new_node { minpose, mincost, minidx };
+    tree_node new_node { minpose, mincost, minidx, mintime };
     return new_node;
 }
 
@@ -386,9 +402,11 @@ void RRTPlanner::rewire(const tree_node& new_node, int new_ind, vector<int>& T,
             continue;
         }
         double new_cost = travel_cost*dist + new_node.accum_cost;
+        double new_time = dist/mean_speed + new_node.time_elapsed;
         if (new_cost < nodes[idx].accum_cost) {
             nodes[idx].parent_idx = new_ind;
             nodes[idx].accum_cost = new_cost;
+            nodes[idx].time_elapsed = new_time;
         }
     }
 }
@@ -402,7 +420,7 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
     last_people = people;
 
     vector<tree_node> nodes;
-    tree_node root {start.pose, 0.0, -1};
+    tree_node root { start.pose, 0.0, -1, 0.0 };
     nodes.push_back(root);
 
     PointT start_xy { start.pose.position.x, start.pose.position.y, 0.0f };
@@ -424,8 +442,13 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
         geometry_msgs::Pose towards_sampled;
         double dist;
         tie(towards_sampled, dist) = steer_towards(nearest.pose, sampled);
+        double time = nearest.time_elapsed + increment_dist/mean_speed;
         double towards_cost = cost(towards_sampled);
         if (towards_cost < 0) {
+            continue;
+        }
+        double people_cost = human_cost(towards_sampled, time);
+        if (people_cost < 0) {
             continue;
         }
         vector<int> T = near(towards_sampled, octree);
