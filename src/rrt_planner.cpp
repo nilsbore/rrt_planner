@@ -399,6 +399,7 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
     footprint = costmap_ros_->getRobotFootprint();
 
     plan.clear();
+    last_people = people;
 
     vector<tree_node> nodes;
     tree_node root {start.pose, 0.0, -1};

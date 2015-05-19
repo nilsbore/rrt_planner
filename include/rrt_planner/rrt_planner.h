@@ -38,6 +38,7 @@ private:
     double travel_cost;
     double mean_speed;
     std::vector<people_msgs::Person> people;
+    std::vector<people_msgs::Person> last_people;
     ros::NodeHandle pn;
     ros::Publisher tree_pub;
     ros::Subscriber people_sub;
