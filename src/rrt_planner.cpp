@@ -393,7 +393,7 @@ void RRTPlanner::recompute_cost(double cost_diff, double time_diff, tree_node& c
     current_node.accum_cost -= cost_diff;
     current_node.time_elapsed -= time_diff;
     for (int i : current_node.children_idxs) {
-        recompute_cost(cost_diff, nodes[i], nodes);
+        recompute_cost(cost_diff, time_diff, nodes[i], nodes);
     }
 }
 
