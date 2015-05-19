@@ -23,6 +23,9 @@ RRTPlanner::RRTPlanner(std::string name, costmap_2d::Costmap2DROS* costmap_ros) 
 void RRTPlanner::initialize(std::string name, costmap_2d::Costmap2DROS* costmap_ros) {
     if (!initialized_) {
         tree_pub = pn.advertise<visualization_msgs::Marker>("/rrt_paths", 10);
+        people_sub = pn.subscribe("/people", 1000, &RRTPlanner::people_callback, this);
+
+        pn.param<double>("/move_base/DWAPlannerROS/max_vel_x", mean_speed, 0.55);
 
         increment_dist = 0.6;
         min_turn_radius = 0.3;
@@ -43,6 +46,11 @@ void RRTPlanner::initialize(std::string name, costmap_2d::Costmap2DROS* costmap_
     else {
         ROS_WARN("This planner has already been initialized... doing nothing");
     }
+}
+
+void RRTPlanner::people_callback(const people_msgs::People::ConstPtr& msg)
+{
+    people = msg->people;
 }
 
 double RRTPlanner::cost(const geometry_msgs::Pose& pose)

@@ -13,6 +13,7 @@
 #include <base_local_planner/costmap_model.h>
 #include <pcl/point_cloud.h>
 #include <pcl/octree/octree.h>
+#include <people_msgs/People.h>
 
 using std::string;
 
@@ -22,6 +23,7 @@ struct tree_node {
     geometry_msgs::Pose pose;
     double accum_cost;
     int parent_idx;
+    double time_elapsed;
 };
 
 class RRTPlanner : public nav_core::BaseGlobalPlanner {
@@ -34,8 +36,11 @@ private:
     double increment_dist;
     double min_turn_radius;
     double travel_cost;
+    double mean_speed;
+    std::vector<people_msgs::Person> people;
     ros::NodeHandle pn;
     ros::Publisher tree_pub;
+    ros::Subscriber people_sub;
 
     costmap_2d::Costmap2DROS* costmap_ros_;
     costmap_2d::Costmap2D* costmap_;
@@ -66,6 +71,8 @@ public:
     bool makePlan(const geometry_msgs::PoseStamped& start,
                 const geometry_msgs::PoseStamped& goal,
                 std::vector<geometry_msgs::PoseStamped>& plan);
+
+                void people_callback(const people_msgs::People::ConstPtr& msg);
 };
 
 } // namespace rrt_planner
