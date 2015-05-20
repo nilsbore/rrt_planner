@@ -69,7 +69,7 @@ double RRTPlanner::human_cost(const geometry_msgs::Pose& pose, double time)
         Eigen::Vector2d human_init(p.position.x, p.position.y);
         Eigen::Vector2d human_vel(p.velocity.x, p.velocity.y);
         double dist = (robot_pose-human_init-time*human_vel).squaredNorm();
-        if (dist < 0.4) {
+        if (dist < 1.0) {
             return -1.0;
         }
     }
@@ -477,7 +477,7 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
         PointT new_xy { new_node.pose.position.x, new_node.pose.position.y, 0.0f };
         octree.addPointToCloud(new_xy, cloud);
 
-        rewire(new_node, nodes.size()-1, T, nodes);
+        //rewire(new_node, nodes.size()-1, T, nodes);
 
         // we actually have to check this for a lot more nodes now
         if (pose_squared_dist(goal.pose, new_node.pose) < 0.2*0.2 &&
