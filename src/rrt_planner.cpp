@@ -388,6 +388,19 @@ tree_node RRTPlanner::choose_parent(const geometry_msgs::Pose& towards_sampled, 
     return new_node;
 }
 
+bool RRTPlanner::rewire_in_collision(tree_node& current_node, double time_diff, vector<tree_node>& nodes)
+{
+    if (human_cost(current_node.pose, current_node.time_elapsed-time_diff) < 0) {
+        return true;
+    }
+    for (int i : current_node.children_idxs) {
+        if (rewire_in_collision(nodes[i], time_diff, nodes)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void RRTPlanner::recompute_cost(double cost_diff, double time_diff, tree_node& current_node, vector<tree_node>& nodes)
 {
     current_node.accum_cost -= cost_diff;
@@ -415,12 +428,17 @@ void RRTPlanner::rewire(const tree_node& new_node, int new_ind, vector<int>& T,
         double new_cost = travel_cost*dist + new_node.accum_cost;
         double new_time = dist/mean_speed + new_node.time_elapsed;
         if (new_cost < nodes[idx].accum_cost) {
+            double time_diff = nodes[idx].time_elapsed - new_time; // need to fix this
+
+            if (rewire_in_collision(nodes[idx], time_diff, nodes)) {
+                continue;
+            }
+
             nodes[nodes[idx].parent_idx].children_idxs.erase(idx);
             nodes[new_ind].children_idxs.insert(idx);
             nodes[idx].parent_idx = new_ind;
 
             double cost_diff = nodes[idx].accum_cost - new_cost;
-            double time_diff = nodes[idx].time_elapsed - new_time; // need to fix this
             recompute_cost(cost_diff, time_diff, nodes[idx], nodes);
         }
     }
@@ -477,7 +495,7 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
         PointT new_xy { new_node.pose.position.x, new_node.pose.position.y, 0.0f };
         octree.addPointToCloud(new_xy, cloud);
 
-        //rewire(new_node, nodes.size()-1, T, nodes);
+        rewire(new_node, nodes.size()-1, T, nodes);
 
         // we actually have to check this for a lot more nodes now
         if (pose_squared_dist(goal.pose, new_node.pose) < 0.2*0.2 &&
