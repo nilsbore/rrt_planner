@@ -26,6 +26,7 @@ void RRTPlanner::initialize(std::string name, costmap_2d::Costmap2DROS* costmap_
         people_sub = pn.subscribe("/people", 1000, &RRTPlanner::people_callback, this);
 
         pn.param<double>("/move_base/DWAPlannerROS/max_vel_x", mean_speed, 0.55);
+        mean_speed *= 0.75;
 
         increment_dist = 0.6;
         min_turn_radius = 0.3;

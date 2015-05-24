@@ -2,10 +2,12 @@
 
 import rospy
 import std_msgs.msg
-from geometry_msgs.msg import Point, Vector3
+from geometry_msgs.msg import Point, Vector3, Point32
 import math
 from people_msgs.msg import PositionMeasurementArray, Person, People
 from easy_markers.generator import MarkerGenerator, Marker
+from sensor_msgs.msg import PointCloud
+from tf import TransformListener
 
 def add(v1, v2):
     return Vector3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z)
@@ -29,6 +31,8 @@ class PeopleGenerator(object):
 
         self.mpub = rospy.Publisher('/visualization_marker', Marker, queue_size=10)
         self.ppub = rospy.Publisher('/people', People, queue_size=10)
+        self.cpub = rospy.Publisher('/people_cloud', PointCloud, queue_size=10)
+        self.tl = TransformListener(10)
 
         while not rospy.is_shutdown():
             rospy.sleep(self.timestep)
@@ -40,10 +44,15 @@ class PeopleGenerator(object):
         ys = [self.ymean + self.ywidth*math.sin(theta) for theta in self.thetas]
         vels = [(y2-y1)/self.timestep for (y1, y2) in zip(old_ys, ys)]
 
+        pc = PointCloud()
         people = People()
         people.header = std_msgs.msg.Header()
         people.header.stamp = rospy.Time.now()
         people.header.frame_id = "/map"
+        pc.header = std_msgs.msg.Header()
+        pc.header.stamp = rospy.Time.now()
+        pc.header.frame_id = "/map"
+        pc.header.seq = 1
         for (x, y, vel) in zip(self.xs, ys, vels):
             p = Person()
             p.name = "Nils"
@@ -61,7 +70,31 @@ class PeopleGenerator(object):
             m.header.frame_id = "/map"
             self.mpub.publish(m)
 
+            p32 = Point32(x, y, 0.365)
+            pc.points.append(p32)
+
+        #now = rospy.Time.now();
+        found = True
+        try:
+            #found = True
+            self.tl.waitForTransform("base_laser_link", "map", pc.header.stamp, rospy.Duration(0.01))
+            #stamp = self.tl.getLatestCommonTime("base_laser_link", "map")
+            pc = self.tl.transformPointCloud("/base_laser_link", pc)
+        except:
+            found = False
+            print "Failed to find transform"
+
         self.ppub.publish(people)
+        if found:
+            #for i in range(0, 60):
+            #    f = (i - 30.0)/10.0;
+            #    pc.points.append(Point32(-3.0, f, -0.365))
+            #    pc.points.append(Point32(3.0, f, -0.365))
+            #    pc.points.append(Point32(f, -3.0, -0.365))
+            #    pc.points.append(Point32(f, 3.0, -0.365))
+            pc.points = [p for p in pc.points if p.x > 0]
+            print len(pc.points)
+            self.cpub.publish(pc)
 
 if __name__ == '__main__':
     server = PeopleGenerator()
