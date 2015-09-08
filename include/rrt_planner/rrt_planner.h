@@ -52,6 +52,7 @@ private:
 
     double cost(const geometry_msgs::Pose& pose);
     double human_cost(const geometry_msgs::Pose& pose, double time);
+    double static_cost_is_human(const geometry_msgs::Pose& pose, double time);
     int nearest(const geometry_msgs::Pose& pose, pcl::octree::OctreePointCloudSearch<PointT>& octree);
     geometry_msgs::Pose sample();
     std::pair<geometry_msgs::Pose, double> steer_towards(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2);

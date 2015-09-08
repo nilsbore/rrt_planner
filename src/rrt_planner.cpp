@@ -78,6 +78,22 @@ double RRTPlanner::human_cost(const geometry_msgs::Pose& pose, double time)
     return 1.0;
 }
 
+double RRTPlanner::static_cost_is_human(const geometry_msgs::Pose& pose, double time)
+{
+    const double overlap_dist = 0.3;
+
+    Eigen::Vector2d robot_pose(pose.position.x, pose.position.y);
+    for (const people_msgs::Person& p : people) {
+        Eigen::Vector2d human_pose(p.position.x, p.position.y);
+        double human_vel = sqrt(p.velocity.x*p.velocity.x+p.velocity.y+p.velocity.y);
+        double dist = (robot_pose-human_pose).squaredNorm();
+        if (dist < overlap_dist && time*human_vel > overlap_dist-dist) {
+            return 1.0;
+        }
+    }
+    return -1.0;
+}
+
 geometry_msgs::Pose RRTPlanner::sample()
 {
     // get min/max of costmap
@@ -485,7 +501,11 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
         double time = nearest.time_elapsed + increment_dist/mean_speed;
         double towards_cost = cost(towards_sampled);
         if (towards_cost < 0) {
-            continue;
+            // here we need to check if it's occupied by a human atm, that will move
+            double is_human = static_cost_is_human(towards_sampled, time);
+            if (is_human < 0) {
+                continue;
+            }
         }
         double people_cost = human_cost(towards_sampled, time);
         if (people_cost < 0) {
