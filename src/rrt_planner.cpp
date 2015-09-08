@@ -11,6 +11,7 @@ namespace rrt_planner {
 
 using namespace std;
 using costmap_2d::FREE_SPACE;
+using costmap_2d::INSCRIBED_INFLATED_OBSTACLE;
 
 RRTPlanner::RRTPlanner() : pn("~") {
 
@@ -117,7 +118,7 @@ geometry_msgs::Pose RRTPlanner::sample()
         }
         int index = costmap_->getIndex(gridx, gridy);
 
-        if (grid[index] != FREE_SPACE) { // can't go here
+        if (grid[index] != FREE_SPACE && grid[index] != INSCRIBED_INFLATED_OBSTACLE) { // can't go here
             continue;
         }
         double randcost = world_model_->footprintCost(randx, randy, randtheta, footprint);
