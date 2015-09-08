@@ -70,6 +70,7 @@ double RRTPlanner::human_cost(const geometry_msgs::Pose& pose, double time)
         Eigen::Vector2d human_init(p.position.x, p.position.y);
         Eigen::Vector2d human_vel(p.velocity.x, p.velocity.y);
         double dist = (robot_pose-human_init-time*human_vel).squaredNorm();
+        //double dist = (robot_pose-human_init).squaredNorm();
         if (dist < 1.0) {
             return -1.0;
         }
@@ -265,12 +266,16 @@ vector<geometry_msgs::Point> RRTPlanner::generate_local_path(const geometry_msgs
     double increment = copysign(0.05/fabs(radius), theta2-theta1);
 
     vector<geometry_msgs::Point> path;
-    for (double theta = theta1; fabs(theta-theta2) > 0.05/fabs(radius); theta += increment) {
+    const int max_iterations = 1000;
+    int counter = 0;
+    for (double theta = theta1; fabs(theta-theta2) > 0.2/fabs(radius) && counter < max_iterations; theta += increment) {
+        cout << "Stuck in loop 3" << endl;
         geometry_msgs::Point point;
         point.x = center(0)+fabs(radius)*cos(theta);
         point.y = center(1)+fabs(radius)*sin(theta);
         point.z = 0.0f;
         path.push_back(point);
+        ++counter;
     }
 
     return path;
@@ -345,6 +350,7 @@ void RRTPlanner::publish_display_path_message(int goal_idx, const vector<tree_no
     int next_idx = nodes[goal_idx].parent_idx;
     geometry_msgs::Pose previous_pose = nodes[goal_idx].pose;
     while (next_idx != -1) {
+        cout << "Stuck in loop 1" << endl;
         geometry_msgs::Pose current_pose = nodes[next_idx].pose;
         vector<geometry_msgs::Point> local_path = generate_local_path(current_pose, previous_pose);
         marker.points.insert(marker.points.end(), local_path.rbegin(), local_path.rend());
@@ -504,6 +510,9 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
             mincost = new_node.accum_cost;
             minidx = nodes.size() - 1;
         }
+
+        //ros::spinOnce();
+        //last_people = people;
     }
 
     cout << "Min path cost: " << mincost << endl;
@@ -519,6 +528,7 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
     int next_idx = minidx;
     plan.push_back(goal);
     while (next_idx != -1) {
+        cout << "Stuck in loop 2" << endl;
         geometry_msgs::PoseStamped pose = start;
         pose.pose = nodes[next_idx].pose;
         plan.push_back(pose);
