@@ -95,8 +95,18 @@ double RRTPlanner::static_cost_is_human(const geometry_msgs::Pose& pose, double 
     return -1.0;
 }
 
-geometry_msgs::Pose RRTPlanner::sample()
+// seriously, we should just do this all at once
+vector<geometry_msgs::Pose> RRTPlanner::sample(const geometry_msgs::Pose& robot_pose, int N)
 {
+    // maybe remove
+    tf::Stamped<tf::Pose> tf_pose;
+    poseMsgToTF(robot_pose, tf_pose);
+    double useless_pitch, useless_roll, yaw;
+    tf_pose.getBasis().getEulerYPR(yaw, useless_pitch, useless_roll);
+
+    Eigen::Vector2d position(robot_pose.position.x, robot_pose.position.y);
+    Eigen::Vector2d direction(cos(yaw), sin(yaw));
+
     // get min/max of costmap
     double maxx = costmap_->getSizeInMetersX() - costmap_->getOriginX();
     double minx = costmap_->getOriginX();
@@ -107,36 +117,44 @@ geometry_msgs::Pose RRTPlanner::sample()
 
     // sample until in free space
     double randx, randy, randtheta;
-    while (true) {
-        randx = double(rand())/double(RAND_MAX)*(maxx - minx) + minx;
-        randy = double(rand())/double(RAND_MAX)*(maxy - miny) + miny;
-        randtheta = double(rand())/double(RAND_MAX)*2.0*M_PI; // - M_PI?
+    vector<geometry_msgs::Pose> poses(N);
+    for (int i = 0; i < N; ++i) {
+        while (true) {
+            randx = double(rand())/double(RAND_MAX)*(maxx - minx) + minx;
+            randy = double(rand())/double(RAND_MAX)*(maxy - miny) + miny;
 
-        unsigned int gridx, gridy;
-        if (!costmap_->worldToMap(randx, randy, gridx, gridy)) {
-            continue;
-        }
-        int index = costmap_->getIndex(gridx, gridy);
+            // find out if in front of or behind the robot
+            if (direction.dot(Eigen::Vector2d(randx, randy) - position) < 0.0) {
+                continue;
+            }
 
-        if (grid[index] != FREE_SPACE && grid[index] != INSCRIBED_INFLATED_OBSTACLE) { // can't go here
-            continue;
+            randtheta = double(rand())/double(RAND_MAX)*2.0*M_PI; // - M_PI?
+
+            unsigned int gridx, gridy;
+            if (!costmap_->worldToMap(randx, randy, gridx, gridy)) {
+                continue;
+            }
+            int index = costmap_->getIndex(gridx, gridy);
+
+            if (grid[index] != FREE_SPACE && grid[index] != INSCRIBED_INFLATED_OBSTACLE) { // can't go here
+                continue;
+            }
+            double randcost = world_model_->footprintCost(randx, randy, randtheta, footprint);
+            if (randcost >= 0) {
+                break;
+            }
         }
-        double randcost = world_model_->footprintCost(randx, randy, randtheta, footprint);
-        if (randcost >= 0) {
-            break;
-        }
+
+        tf::Quaternion goal_quat = tf::createQuaternionFromYaw(randtheta);
+        poses[i].position.x = randx;
+        poses[i].position.y = randy;
+        poses[i].orientation.x = goal_quat.x();
+        poses[i].orientation.y = goal_quat.y();
+        poses[i].orientation.z = goal_quat.z();
+        poses[i].orientation.w = goal_quat.w();
     }
 
-    geometry_msgs::Pose new_goal;
-    tf::Quaternion goal_quat = tf::createQuaternionFromYaw(randtheta);
-    new_goal.position.x = randx;
-    new_goal.position.y = randy;
-    new_goal.orientation.x = goal_quat.x();
-    new_goal.orientation.y = goal_quat.y();
-    new_goal.orientation.z = goal_quat.z();
-    new_goal.orientation.w = goal_quat.w();
-
-    return new_goal;
+    return poses;
 }
 
 double pose_squared_dist(const geometry_msgs::Pose& p1, const geometry_msgs::Pose& p2)
@@ -491,8 +509,9 @@ bool RRTPlanner::makePlan(const geometry_msgs::PoseStamped& start, const geometr
     int minidx = -1;
     double mincost = std::numeric_limits<double>::infinity();
     const int N = 10000;
+    vector<geometry_msgs::Pose> samples = sample(start.pose, N);
     for (int i = 0; i < N; ++i) {
-        geometry_msgs::Pose sampled = sample();
+        geometry_msgs::Pose sampled = samples[i];
         // find closest node
         int nearest_idx = nearest(sampled, octree);
         tree_node nearest = nodes[nearest_idx];
